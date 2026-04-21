@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ruleta Google</title>
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: #f5f7fb;
+      color: #111827;
+    }
+
+    .app {
+      max-width: 1250px;
+      margin: 0 auto;
+      padding: 24px;
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 24px;
+      min-height: 100vh;
+    }
+
+    .panel {
+      background: #fff;
+      border-radius: 22px;
+      box-shadow: 0 14px 40px rgba(0,0,0,.08);
+      padding: 22px;
+    }
+
+    .main {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 760px;
+      position: relative;
+    }
+
+    .title {
+      font-size: 34px;
+      font-weight: 800;
+      letter-spacing: .2px;
+      margin-bottom: 18px;
+      color: #111827;
+    }
+
+    .wheel-wrap {
+      position: relative;
+      width: 760px;
+      max-width: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    #wheel {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    .pointer {
+      position: absolute;
+      top: 8px;
+      left: 50%;
+      width: 0;
+      height: 0;
+      border-left: 20px solid transparent;
+      border-right: 20px solid transparent;
+      border-top: 38px solid #111827;
+      transform: translateX(-50%) rotate(0deg);
+      transform-origin: 50% 10%;
+      z-index: 10;
+      filter: drop-shadow(0 5px 10px rgba(0,0,0,.18));
+    }
+
+    .controls {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-top: 18px;
+    }
+
+    button {
+      border: none;
+      border-radius: 14px;
+      padding: 14px 24px;
+      font-size: 16px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: .2s ease;
+    }
+
+    button:hover { transform: translateY(-1px); }
+    button:disabled {
+      opacity: .55;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .spin-btn {
+      background: #16a34a;
+      color: #fff;
+    }
+
+    .reset-btn {
+      background: #e5e7eb;
+      color: #111827;
+    }
+
+    .current {
+      min-height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      margin-top: 14px;
+      font-size: 22px;
+      font-weight: 800;
+      color: #111827;
+      padding: 0 12px;
+    }
+
+    .side h2 {
+      margin: 0 0 14px;
+      font-size: 24px;
+    }
+
+    .winner-list {
+      margin: 0;
+      padding-left: 24px;
+      line-height: 2;
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .empty {
+      color: #6b7280;
+      font-size: 16px;
+      margin-top: 10px;
+    }
+
+    #confettiCanvas {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      pointer-events: none;
+      z-index: 999;
+    }
+
+    @media (max-width: 980px) {
+      .app {
+        grid-template-columns: 1fr;
+      }
+
+      .main {
+        min-height: 620px;
+      }
+
+      .title {
+        font-size: 28px;
+      }
+
+      .pointer {
+        top: 6px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="confettiCanvas"></canvas>
+
+  <div class="app">
+    <div class="panel main">
+      <div class="title">Ruleta Google</div>
+
+      <div class="wheel-wrap">
+        <div class="pointer" id="pointer"></div>
+        <canvas id="wheel" width="760" height="760"></canvas>
+      </div>
+
+      <div class="controls">
+        <button id="spinBtn" class="spin-btn">Spin</button>
+        <button id="resetBtn" class="reset-btn">Reset</button>
+      </div>
+
+      <div class="current" id="currentText">Lista</div>
+    </div>
+
+    <div class="panel side">
+      <h2>Ganadores</h2>
+      <ol id="winnerList" class="winner-list"></ol>
+      <div id="emptyText" class="empty">Todavía no hay nombres seleccionados.</div>
+    </div>
+  </div>
+
+  <script>
+    const fixedOrder = [
+      "Keydi",
+      "Carlos Ariel",
+      "Onesy",
+      "Carlos Armas",
+      "Erick",
+      "Dénia",
+      "Esther",
+      "Frandack"
+    ];
+
+    const spinTurnsPattern = [8, 7, 9, 8, 7, 8, 9, 8];
+
+    let remaining = [...fixedOrder];
+    let winners = [];
+    let spinIndex = 0;
+
+    let currentRotation = 0;
+    let spinning = false;
+
+    let celebratingIndex = -1;
+    let removalState = null;
+
+    let pointerKick = 0;
+    let lastBoundary = null;
+
+    const wheelCanvas = document.getElementById("wheel");
+    const wheelCtx = wheelCanvas.getContext("2d");
+    const pointerEl = document.getElementById("pointer");
+
+    const spinBtn = document.getElementById("spinBtn");
+    const resetBtn = document.getElementById("resetBtn");
+    const winnerList = document.getElementById("winnerList");
+    const emptyText = document.getElementById("emptyText");
+    const currentText = document.getElementById("currentText");
+
+    const confettiCanvas = document.getElementById("confettiCanvas");
+    const confettiCtx = confettiCanvas.getContext("2d");
+    let confettiParticles = [];
+    let confettiAnimating = false;
+
+    function resizeConfettiCanvas() {
+      confettiCanvas.width = window.innerWidth;
+      confettiCanvas.height = window.innerHeight;
+    }
+
+    resizeConfettiCanvas();
+    window.addEventListener("resize", resizeConfettiCanvas);
+
+    function normalizeAngle(angle) {
+      const full = Math.PI * 2;
+      return ((angle % full) + full) % full;
+    }
+
+    function easeOutCubic(t) {
+      return 1 - Math.pow(1 - t, 3);
+    }
+
+    function easeInOutCubic(t) {
+      return t < 0.5
+        ? 4 * t * t * t
+        : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    }
+
+    function easeOutBack(t) {
+      const c1 = 1.70158;
+      const c3 = c1 + 1;
+      return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+    }
+
+    function segmentColor(i, total) {
+      const hue = Math.round((360 / Math.max(total, 1)) * i);
+      return `hsl(${hue}, 78%, 58%)`;
+    }
+
+    function fontForName(name, count) {
+      if (count >= 7) {
+        if (name.length >= 13) return "bold 20px Arial";
+        if (name.length >= 10) return "bold 22px Arial";
+        return "bold 24px Arial";
+      }
+      if (name.length >= 13) return "bold 22px Arial";
+      return "bold 26px Arial";
+    }
+
+    function updatePointerTransform() {
+      pointerEl.style.transform = `translateX(-50%) rotate(${pointerKick}deg)`;
+    }
+
+    function settlePointer() {
+      if (Math.abs(pointerKick) < 0.08) {
+        pointerKick = 0;
+        updatePointerTransform();
+        return;
+      }
+      pointerKick *= 0.84;
+      updatePointerTransform();
+      requestAnimationFrame(settlePointer);
+    }
+
+    function handlePointerTick() {
+      if (!remaining.length) return;
+
+      const arc = (Math.PI * 2) / remaining.length;
+      const measure = Math.floor(((-currentRotation + Math.PI / 2) / arc));
+
+      if (lastBoundary === null) {
+        lastBoundary = measure;
+      }
+
+      if (measure !== lastBoundary) {
+        pointerKick = -18;
+        lastBoundary = measure;
+      }
+
+      pointerKick += (0 - pointerKick) * 0.24;
+      updatePointerTransform();
+    }
+
+    function drawWheel() {
+      const ctx = wheelCtx;
+      const w = wheelCanvas.width;
+      const h = wheelCanvas.height;
+      const cx = w / 2;
+      const cy = h / 2 + 8;
+      const radius = 305;
+
+      ctx.clearRect(0, 0, w, h);
+
+      if (!remaining.length) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.fillStyle = "#e5e7eb";
+        ctx.fill();
+
+        ctx.fillStyle = "#111827";
+        ctx.font = "bold 34px Arial";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("Finalizado", cx, cy);
+        return;
+      }
+
+      const arc = (Math.PI * 2) / remaining.length;
+      const now = performance.now();
+
+      for (let i = 0; i < remaining.length; i++) {
+        let start = currentRotation + i * arc;
+        let end = start + arc;
+        let mid = start + arc / 2;
+
+        let alpha = 1;
+        let localRadius = radius;
+
+        if (celebratingIndex === i) {
+          const pulse = 1 + 0.025 * Math.sin(now / 110);
+          localRadius = radius * pulse;
+        }
+
+        if (removalState && removalState.index === i) {
+          const p = removalState.progress;
+          const midBase = start + (end - start) / 2;
+
+          start = start + (midBase - start) * p;
+          end = end - (end - midBase) * p;
+          mid = start + (end - start) / 2;
+
+          localRadius = radius * (1 - 0.55 * p);
+          alpha = 1 - p;
+        }
+
+        ctx.save();
+        ctx.globalAlpha = Math.max(alpha, 0);
+
+        if (celebratingIndex === i && !removalState) {
+          ctx.shadowColor = "rgba(0,0,0,0.22)";
+          ctx.shadowBlur = 18;
+          ctx.shadowOffsetY = 6;
+        }
+
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, localRadius, start, end);
+        ctx.closePath();
+        ctx.fillStyle = segmentColor(i, remaining.length);
+        ctx.fill();
+
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "#ffffff";
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.save();
+        ctx.globalAlpha = Math.max(alpha, 0);
+        ctx.translate(cx, cy);
+        ctx.rotate(mid);
+
+        const normalized = normalizeAngle(mid);
+        const flip = normalized > Math.PI / 2 && normalized < (Math.PI * 3) / 2;
+        const textRadius = localRadius - 40;
+
+        ctx.fillStyle = "#ffffff";
+        ctx.font = fontForName(remaining[i], remaining.length);
+        ctx.textBaseline = "middle";
+
+        if (flip) {
+          ctx.rotate(Math.PI);
+          ctx.textAlign = "left";
+          ctx.fillText(remaining[i], -textRadius, 0);
+        } else {
+          ctx.textAlign = "right";
+          ctx.fillText(remaining[i], textRadius, 0);
+        }
+
+        ctx.restore();
+      }
+
+      ctx.beginPath();
+      ctx.arc(cx, cy, 68, 0, Math.PI * 2);
+      ctx.fillStyle = "#111827";
+      ctx.fill();
+      ctx.lineWidth = 6;
+      ctx.strokeStyle = "#ffffff";
+      ctx.stroke();
+    }
+
+    function renderWinners() {
+      winnerList.innerHTML = "";
+
+      if (!winners.length) {
+        emptyText.style.display = "block";
+        return;
+      }
+
+      emptyText.style.display = "none";
+
+      winners.forEach(name => {
+        const li = document.createElement("li");
+        li.textContent = name;
+        winnerList.appendChild(li);
+      });
+    }
+
+    function burstConfetti() {
+      const rect = wheelCanvas.getBoundingClientRect();
+      const originX = rect.left + rect.width / 2;
+      const originY = rect.top + rect.height / 2 - 100;
+
+      const colors = [
+        "#ef4444", "#f59e0b", "#10b981", "#3b82f6",
+        "#8b5cf6", "#ec4899", "#22c55e", "#f97316"
+      ];
+
+      for (let i = 0; i < 200; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 4 + Math.random() * 8;
+
+        confettiParticles.push({
+          x: originX,
+          y: originY,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed - 2,
+          size: 5 + Math.random() * 6,
+          color: colors[Math.floor(Math.random() * colors.length)],
+          rotation: Math.random() * Math.PI * 2,
+          rotationSpeed: (Math.random() - 0.5) * 0.35,
+          alpha: 1,
+          gravity: 0.14 + Math.random() * 0.05
+        });
+      }
+
+      if (!confettiAnimating) {
+        confettiAnimating = true;
+        requestAnimationFrame(animateConfetti);
+      }
+    }
+
+    function animateConfetti() {
+      confettiCtx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
+
+      for (let i = confettiParticles.length - 1; i >= 0; i--) {
+        const p = confettiParticles[i];
+
+        p.vy += p.gravity;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.rotation += p.rotationSpeed;
+        p.alpha -= 0.008;
+
+        confettiCtx.save();
+        confettiCtx.globalAlpha = Math.max(p.alpha, 0);
+        confettiCtx.translate(p.x, p.y);
+        confettiCtx.rotate(p.rotation);
+        confettiCtx.fillStyle = p.color;
+        confettiCtx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.65);
+        confettiCtx.restore();
+
+        if (p.alpha <= 0 || p.y > confettiCanvas.height + 40) {
+          confettiParticles.splice(i, 1);
+        }
+      }
+
+      if (confettiParticles.length > 0) {
+        requestAnimationFrame(animateConfetti);
+      } else {
+        confettiAnimating = false;
+        confettiCtx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
+      }
+    }
+
+    function animateRemoval(targetIndex, selectedName) {
+      removalState = { index: targetIndex, progress: 0 };
+
+      const duration = 1450;
+      const startTime = performance.now();
+
+      function frame(now) {
+        const t = Math.min((now - startTime) / duration, 1);
+        removalState.progress = easeInOutCubic(t);
+
+        pointerKick += (0 - pointerKick) * 0.18;
+        updatePointerTransform();
+        drawWheel();
+
+        if (t < 1) {
+          requestAnimationFrame(frame);
+          return;
+        }
+
+        removalState = null;
+        celebratingIndex = -1;
+
+        winners.push(selectedName);
+        remaining.splice(targetIndex, 1);
+        spinIndex++;
+
+        renderWinners();
+        currentRotation = normalizeAngle(currentRotation);
+        lastBoundary = null;
+        drawWheel();
+
+        if (!remaining.length || spinIndex >= fixedOrder.length) {
+          spinBtn.disabled = true;
+          currentText.textContent = selectedName + " • Finalizado";
+        } else {
+          spinBtn.disabled = false;
+          currentText.textContent = selectedName;
+        }
+
+        spinning = false;
+        settlePointer();
+      }
+
+      requestAnimationFrame(frame);
+    }
+
+    function spinToNext() {
+      if (spinning || spinIndex >= fixedOrder.length || !remaining.length) return;
+
+      const targetName = fixedOrder[spinIndex];
+      const targetIndex = remaining.indexOf(targetName);
+      if (targetIndex === -1) return;
+
+      spinning = true;
+      spinBtn.disabled = true;
+      currentText.textContent = "Girando...";
+
+      const arc = (Math.PI * 2) / remaining.length;
+      const selectedCenter = targetIndex * arc + arc / 2;
+      const pointerAngle = -Math.PI / 2;
+
+      const turns = spinTurnsPattern[spinIndex] || 8;
+      const finalTarget = pointerAngle - selectedCenter + (Math.PI * 2 * turns);
+      const overshootTarget = finalTarget + 0.22;
+
+      const phase1Duration = 4200;
+      const phase2Duration = 700;
+      const totalDuration = phase1Duration + phase2Duration;
+
+      const startRotation = currentRotation;
+      const startTime = performance.now();
+      lastBoundary = null;
+
+      function frame(now) {
+        const elapsed = now - startTime;
+
+        if (elapsed <= phase1Duration) {
+          const t1 = elapsed / phase1Duration;
+          currentRotation = startRotation + (overshootTarget - startRotation) * easeOutCubic(t1);
+        } else {
+          const t2 = Math.min((elapsed - phase1Duration) / phase2Duration, 1);
+          currentRotation = overshootTarget + (finalTarget - overshootTarget) * easeOutBack(t2);
+        }
+
+        handlePointerTick();
+        drawWheel();
+
+        if (elapsed < totalDuration) {
+          requestAnimationFrame(frame);
+          return;
+        }
+
+        currentRotation = finalTarget;
+        pointerKick = -7;
+        updatePointerTransform();
+        drawWheel();
+
+        celebratingIndex = targetIndex;
+        currentText.textContent = targetName;
+        burstConfetti();
+
+        setTimeout(() => {
+          animateRemoval(targetIndex, targetName);
+        }, 1100);
+      }
+
+      requestAnimationFrame(frame);
+    }
+
+    function resetAll() {
+      remaining = [...fixedOrder];
+      winners = [];
+      spinIndex = 0;
+      currentRotation = 0;
+      spinning = false;
+      celebratingIndex = -1;
+      removalState = null;
+      pointerKick = 0;
+      lastBoundary = null;
+
+      spinBtn.disabled = false;
+      currentText.textContent = "Lista";
+      renderWinners();
+      updatePointerTransform();
+      drawWheel();
+    }
+
+    spinBtn.addEventListener("click", spinToNext);
+    resetBtn.addEventListener("click", resetAll);
+
+    renderWinners();
+    updatePointerTransform();
+    drawWheel();
+  </script>
+</body>
+</html>
